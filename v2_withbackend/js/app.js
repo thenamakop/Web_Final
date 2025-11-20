@@ -6,6 +6,9 @@ class AppCore {
     this.data = null;
     this.currentPage = this._getCurrentPage();
     this.init();
+    if (!document.getElementById('toast-root')) {
+      const t = document.createElement('div'); t.id = 'toast-root'; t.className = 'toast-container'; document.body.appendChild(t);
+    }
   }
 
   /**
@@ -34,6 +37,18 @@ class AppCore {
       }
       this.data = await response.json();
       await this.loadTasksFromAPI();
+      // Load authenticated user details
+      try {
+        const token = localStorage.getItem('token') || '';
+        if (token) {
+          const base = (window.location.origin && window.location.origin.startsWith('http')) ? '' : 'http://localhost:3000';
+          const meRes = await fetch(`${base}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+          if (meRes.ok) {
+            const me = await meRes.json();
+            this.data.user = { name: me.name, email: me.email, avatar: (me.name || 'U').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase() };
+          }
+        }
+      } catch (_) {}
       console.log('Data loaded successfully');
     } catch (error) {
       console.error('Error loading data:', error);
@@ -45,7 +60,8 @@ class AppCore {
   async loadTasksFromAPI() {
     try {
       const base = (window.location.origin && window.location.origin.startsWith('http')) ? '' : 'http://localhost:3000';
-      const res = await fetch(`${base}/api/tasks`);
+      const token = localStorage.getItem('token') || '';
+      const res = await fetch(`${base}/api/tasks`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
       if (!res.ok) throw new Error('Failed tasks');
       const tasks = await res.json();
       this.data.tasks = tasks.map(t => ({
@@ -53,7 +69,10 @@ class AppCore {
         title: t.title,
         priority: t.priority || 'Medium',
         status: t.status || 'backlog',
-        assignee: t.assignee || ''
+        assignee: t.assignee || '',
+        userId: t.userId,
+        starred: Boolean(t.starred),
+        createdAt: t.createdAt || Date.now()
       }));
     } catch (e) {
       if (!this.data.tasks) this.data.tasks = [];
@@ -70,22 +89,17 @@ class AppCore {
     // Check for saved theme preference or system preference
     const savedTheme = localStorage.getItem('theme');
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    
-    // Set initial theme
-    if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
-      document.body.classList.add('dark-theme');
-      themeToggle.checked = true;
-    }
+    const shouldDark = savedTheme ? savedTheme === 'dark' : prefersDark;
+    document.documentElement.classList.toggle('dark-theme', shouldDark);
+    document.body.classList.toggle('dark-theme', shouldDark);
+    themeToggle.checked = shouldDark;
 
     // Handle theme toggle
     themeToggle.addEventListener('change', () => {
-      if (themeToggle.checked) {
-        document.body.classList.add('dark-theme');
-        localStorage.setItem('theme', 'dark');
-      } else {
-        document.body.classList.remove('dark-theme');
-        localStorage.setItem('theme', 'light');
-      }
+      const enable = themeToggle.checked;
+      document.documentElement.classList.toggle('dark-theme', enable);
+      document.body.classList.toggle('dark-theme', enable);
+      localStorage.setItem('theme', enable ? 'dark' : 'light');
     });
   }
 
@@ -115,6 +129,30 @@ class AppCore {
           window.location.href = 'tasks.html#new';
         }
       });
+    });
+
+    // Logout action
+    const profileRow = document.getElementById('profile-row');
+    const profileMenu = document.getElementById('profile-menu');
+    const logoutAction = document.getElementById('logout-action');
+    if (profileRow && profileMenu) {
+      profileRow.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const open = profileMenu.style.display === 'block';
+        profileMenu.style.display = open ? 'none' : 'block';
+      });
+      document.addEventListener('click', () => { profileMenu.style.display = 'none'; });
+    }
+    logoutAction?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        const base = (window.location.origin && window.location.origin.startsWith('http')) ? '' : 'http://localhost:3000';
+        const token = localStorage.getItem('token') || '';
+        if (token) await fetch(`${base}/api/auth/logout`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      } catch (_) {}
+      localStorage.removeItem('token');
+      document.cookie = 'token=; Path=/; Max-Age=0';
+      window.location.href = 'login.html';
     });
   }
 
@@ -191,6 +229,21 @@ class AppCore {
         break;
       // Add other pages as needed
     }
+  }
+
+  showToast(message, type='success') {
+    let root = document.getElementById('toast-root');
+    if (!root) {
+      root = document.createElement('div');
+      root.id = 'toast-root';
+      root.className = 'toast-container';
+      document.body.appendChild(root);
+    }
+    const el = document.createElement('div');
+    el.className = `toast ${type}`;
+    el.textContent = message;
+    root.appendChild(el);
+    setTimeout(()=>{ el.remove(); }, 2000);
   }
 
   initIndexTasks() {
@@ -513,12 +566,14 @@ class AppCore {
       const priority = document.getElementById('task-priority').value;
       const status = document.getElementById('task-status').value;
       const assignee = document.getElementById('task-assignee').value.trim();
+      const deadlineInput = document.getElementById('task-deadline').value;
       if (!title) return;
       try {
+        const tokenCreate = localStorage.getItem('token') || '';
         const res = await fetch('/api/tasks', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title, priority, status, assignee })
+          headers: { 'Content-Type': 'application/json', ...(tokenCreate ? { Authorization: `Bearer ${tokenCreate}` } : {}) },
+          body: JSON.stringify({ title, priority, status, assignee, deadline: deadlineInput ? `${deadlineInput}:00` : undefined })
         });
         if (!res.ok) throw new Error('Failed to create');
         const created = await res.json();
@@ -529,7 +584,13 @@ class AppCore {
           priority: created.priority,
           status: created.status,
           assignee: created.assignee,
-          createdAt
+          starred: Boolean(created.starred),
+          createdAt,
+          assignedAt: created.assignedAt,
+          assignedAtIST: created.assignedAtIST,
+          deadline: created.deadline,
+          completedAt: created.completedAt,
+          completedAtIST: created.completedAtIST
         });
         this.closeTaskModal();
         const board = document.querySelector('.tasks-board');
@@ -554,7 +615,19 @@ class AppCore {
       card.innerHTML = `
         <div class="card-title">${task.title}</div>
         <div class="card-meta">Priority • ${task.priority}${task.assignee ? ` • ${task.assignee}` : ''}</div>
-        <button class="star-button${task.starred ? ' active' : ''}" title="Pin"></button>
+        <div class="card-footer">
+          <span>Assigned • ${task.assignedAtIST || new Date(task.createdAt||Date.now()).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}</span>
+          ${task.deadline ? `<span class="badge ${Date.now()>Date.parse(task.deadline)?'overdue':'near-due'}">${Date.now()>Date.parse(task.deadline)?'Overdue':'Due ' + new Date(task.deadline).toLocaleDateString('en-IN')}</span>` : ''}
+        </div>
+        <div class="card-actions">
+          <button class="task-action" data-action="edit" title="Edit">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="currentColor"></path></svg>
+          </button>
+          <button class="task-action" data-action="delete" title="Delete">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12v2H6zm2 3h8v9a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-9zm3-6h2l1 2H8l1-2z" fill="currentColor"></path></svg>
+          </button>
+          <button class="star-button${task.starred ? ' active' : ''}" title="Pin"></button>
+        </div>
       `;
       const starBtn = card.querySelector('.star-button');
       starBtn.addEventListener('click', async (e) => {
@@ -565,7 +638,8 @@ class AppCore {
         this.renderPinnedTasks();
         try {
           const base = (window.location.origin && window.location.origin.startsWith('http')) ? '' : 'http://localhost:3000';
-          await fetch(`${base}/api/tasks/${task.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ starred: next }) });
+          const tokenStar = localStorage.getItem('token') || '';
+          await fetch(`${base}/api/tasks/${task.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...(tokenStar ? { Authorization: `Bearer ${tokenStar}` } : {}) }, body: JSON.stringify({ starred: next }) });
         } catch (_) {}
       });
       card.addEventListener('dragstart', (e) => {
@@ -607,8 +681,9 @@ class AppCore {
         this.updateTasksStatusWidget();
         try {
           const base = (window.location.origin && window.location.origin.startsWith('http')) ? '' : 'http://localhost:3000';
+          const tokenMove = localStorage.getItem('token') || '';
           await fetch(`${base}/api/tasks/${id}`, {
-            method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status })
+            method: 'PATCH', headers: { 'Content-Type': 'application/json', ...(tokenMove ? { Authorization: `Bearer ${tokenMove}` } : {}) }, body: JSON.stringify({ status })
           });
         } catch (err) {
           task.status = prev;
@@ -621,6 +696,104 @@ class AppCore {
       });
       cards.forEach(c => { c.classList.add('card-in'); body.appendChild(c); });
       if (countEl) countEl.textContent = String(cards.length);
+
+      // Wire edit/delete for cards in this column after injection
+      const wireActions = () => {
+        body.querySelectorAll('.kanban-card').forEach(cardEl => {
+          const id = cardEl.dataset.id;
+          const actions = cardEl.querySelector('.card-actions');
+          const del = actions?.querySelector('[data-action="delete"]');
+          const edit = actions?.querySelector('[data-action="edit"]');
+          del && del.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            try {
+              const base = (window.location.origin && window.location.origin.startsWith('http')) ? '' : 'http://localhost:3000';
+              const tokenDel = localStorage.getItem('token') || '';
+              const res = await fetch(`${base}/api/tasks/${id}`, { method: 'DELETE', headers: tokenDel ? { Authorization: `Bearer ${tokenDel}` } : {} });
+              if (!res.ok) throw new Error('Delete failed');
+              this.data.tasks = (this.data.tasks || []).filter(x => String(x.id) !== String(id));
+              this._renderBoard(board);
+              this.updateTasksStatusWidget();
+              this.renderPinnedTasks();
+            } catch (_) {}
+          });
+          edit && edit.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const task = (this.data?.tasks || []).find(t => String(t.id) === String(id));
+            if (!task) return;
+            // Build an edit dialog dynamically
+            const modal = document.createElement('div');
+            modal.className = 'modal';
+            modal.style.display = 'flex';
+            modal.innerHTML = `
+              <div class="modal-content">
+                <h3>Edit Task</h3>
+                <form id="edit-task-form">
+                  <div class="form-field"><label>Title</label><input class="input" id="edit-title" value="${task.title}"></div>
+                  <div class="form-row">
+                    <div class="form-field"><label>Priority</label>
+                      <select class="select" id="edit-priority">
+                        <option ${task.priority==='High'?'selected':''}>High</option>
+                        <option ${task.priority==='Medium'?'selected':''}>Medium</option>
+                        <option ${task.priority==='Low'?'selected':''}>Low</option>
+                      </select>
+                    </div>
+                    <div class="form-field"><label>Status</label>
+                      <select class="select" id="edit-status">
+                        <option value="backlog" ${task.status==='backlog'?'selected':''}>Backlog</option>
+                        <option value="in-progress" ${task.status==='in-progress'?'selected':''}>In Progress</option>
+                        <option value="review" ${task.status==='review'?'selected':''}>Review</option>
+                        <option value="done" ${task.status==='done'?'selected':''}>Done</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-field"><label>Assignee</label><input class="input" id="edit-assignee" value="${task.assignee||''}"></div>
+                    <div class="form-field"><label>Deadline</label><input class="input" type="datetime-local" id="edit-deadline" value="${task.deadline? new Date(task.deadline).toISOString().slice(0,16):''}"></div>
+                  </div>
+                  <div class="modal-actions"><button type="button" class="button" id="edit-cancel">Cancel</button><button type="submit" class="button button-primary">Save</button></div>
+                </form>
+              </div>`;
+            document.body.appendChild(modal);
+            const close = ()=>{ modal.remove(); };
+            modal.querySelector('#edit-cancel').addEventListener('click', close);
+            document.addEventListener('keydown', function onKey(e){ if(e.key==='Escape'){ close(); document.removeEventListener('keydown', onKey);} });
+            const formEl = modal.querySelector('#edit-task-form');
+            formEl.addEventListener('submit', async (ev)=>{
+              ev.preventDefault();
+              const next = {
+                title: modal.querySelector('#edit-title').value.trim(),
+                priority: modal.querySelector('#edit-priority').value,
+                status: modal.querySelector('#edit-status').value,
+                assignee: modal.querySelector('#edit-assignee').value.trim(),
+                deadline: (function(){ const v = modal.querySelector('#edit-deadline').value; return v ? `${v}:00` : undefined; })()
+              };
+              let ok = false, updated = null;
+              try {
+                const base = (window.location.origin && window.location.origin.startsWith('http')) ? '' : 'http://localhost:3000';
+                const tokenEdit = localStorage.getItem('token') || '';
+                const res = await fetch(`${base}/api/tasks/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...(tokenEdit ? { Authorization: `Bearer ${tokenEdit}` } : {}) }, body: JSON.stringify(next) });
+                ok = res.ok;
+                try { updated = await res.json(); } catch (_) { updated = null; }
+              } catch (_) { ok = false; }
+              if (ok) {
+                this.showToast('Task updated', 'success');
+                if (updated) Object.assign(task, updated);
+                try {
+                  this._renderBoard(board);
+                  this.updateTasksStatusWidget();
+                } catch (_) {}
+                close();
+              } else {
+                this.showToast('Save failed', 'error');
+              }
+            });
+            // Ensure clicking inside modal does not close it due to global handlers
+            modal.querySelector('.modal-content').addEventListener('click', (e)=> e.stopPropagation());
+          });
+        });
+      };
+      wireActions();
     });
   }
 
@@ -635,10 +808,11 @@ class AppCore {
       if (!title) return;
       try {
         const base = (window.location.origin && window.location.origin.startsWith('http')) ? '' : 'http://localhost:3000';
-        const res = await fetch(`${base}/api/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, priority, status: 'backlog' }) });
+        const tokenQuick = localStorage.getItem('token') || '';
+        const res = await fetch(`${base}/api/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(tokenQuick ? { Authorization: `Bearer ${tokenQuick}` } : {}) }, body: JSON.stringify({ title, priority, status: 'backlog' }) });
         if (!res.ok) return;
         const created = await res.json();
-        this.data.tasks.push({ id: created._id || created.id, title: created.title, priority: created.priority, status: created.status, assignee: created.assignee || '', starred: created.starred || false, createdAt: created.createdAt || Date.now() });
+        this.data.tasks.push({ id: created._id || created.id, title: created.title, priority: created.priority, status: created.status, assignee: created.assignee || '', starred: created.starred || false, createdAt: created.createdAt || Date.now(), assignedAt: created.assignedAt, assignedAtIST: created.assignedAtIST, deadline: created.deadline });
         input.value = '';
         const board = document.querySelector('.tasks-board');
         if (board) this._renderBoard(board);
@@ -653,13 +827,32 @@ class AppCore {
 
   renderPinnedTasks() {
     const container = document.getElementById('pinned-list');
+    const widget = document.getElementById('pinned-widget');
     if (!container) return;
     const items = (this.data?.tasks || []).filter(t => t.starred).slice(0,6);
     container.innerHTML = '';
+    if (widget) widget.style.display = items.length ? '' : 'none';
     items.forEach(t => {
       const div = document.createElement('div');
       div.className = 'pinned-card';
       div.innerHTML = `<div class="title">${t.title}</div><div class="meta">Priority • ${t.priority}${t.assignee ? ` • ${t.assignee}` : ''}</div>`;
+      const actions = document.createElement('div');
+      actions.className = 'pinned-actions';
+      const unpin = document.createElement('button');
+      unpin.className = 'task-action';
+      unpin.title = 'Unpin';
+      unpin.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4l5 5-2 2-2-2-6 6-3 1 1-3 6-6-2-2 2-2z" fill="currentColor"></path></svg>';
+      unpin.addEventListener('click', async () => {
+        t.starred = false;
+        try {
+          const base = (window.location.origin && window.location.origin.startsWith('http')) ? '' : 'http://localhost:3000';
+          const tokenUnpin = localStorage.getItem('token') || '';
+          await fetch(`${base}/api/tasks/${t.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...(tokenUnpin ? { Authorization: `Bearer ${tokenUnpin}` } : {}) }, body: JSON.stringify({ starred: false }) });
+        } catch (_) {}
+        this.renderPinnedTasks();
+      });
+      actions.appendChild(unpin);
+      div.appendChild(actions);
       container.appendChild(div);
     });
   }
@@ -733,14 +926,56 @@ class AppCore {
     const total = Math.max(1, (count.backlog + count.progress + count.review + count.done));
     stacks.forEach(chart => {
       const segBacklog = chart.querySelector('.stack-segment.backlog');
-      const segProgress = chart.querySelector('.stack-segment.progress');
+      const segProgress = chart.querySelector('.stack-segment.in-progress') || chart.querySelector('.stack-segment.progress');
       const segReview = chart.querySelector('.stack-segment.review');
       const segDone = chart.querySelector('.stack-segment.done');
-      if (segBacklog) segBacklog.style.width = `${Math.round((count.backlog/total)*100)}%`;
-      if (segProgress) segProgress.style.width = `${Math.round((count.progress/total)*100)}%`;
-      if (segReview) segReview.style.width = `${Math.round((count.review/total)*100)}%`;
-      if (segDone) segDone.style.width = `${Math.round((count.done/total)*100)}%`;
+      const pct = s => (s/total)*100;
+      const widths = {
+        backlog: pct(count.backlog),
+        progress: pct(count.progress),
+        review: pct(count.review),
+        done: pct(count.done)
+      };
+      // Avoid integer rounding until assigning flex-basis; fix residual after rounding
+      const round = v => Math.max(0, Math.round(v));
+      let rb = round(widths.backlog), rp = round(widths.progress), rr = round(widths.review), rd = round(widths.done);
+      let sum = rb + rp + rr + rd;
+      if (sum === 0) { rd = 100; sum = 100; }
+      if (sum !== 100) {
+        const diff = 100 - sum;
+        // put residual on 'done' for visual stability
+        rd = Math.max(0, rd + diff);
+      }
+      // Account for container padding and gap by using flex-basis
+      const setBasis = (el, pct) => { if (el) el.style.flexBasis = `${pct}%`; };
+      setBasis(segBacklog, rb);
+      setBasis(segProgress, rp);
+      setBasis(segReview, rr);
+      setBasis(segDone, rd);
+      // Handle edge case: when one segment is 100%, ensure it still displays with its color
+      [
+        [segBacklog, 'backlog'],
+        [segProgress, 'progress'],
+        [segReview, 'review'],
+        [segDone, 'done']
+      ].forEach(([el, key]) => {
+        if (!el) return;
+        const w = { backlog: rb, progress: rp, review: rr, done: rd }[key];
+        el.style.display = w === 0 ? 'none' : 'block';
+        el.style.minWidth = w > 0 ? '2px' : '';
+      });
     });
+    const legend = document.querySelector('.chart.stacked .legend');
+    if (legend) {
+      const setCount = (cls, val) => {
+        const el = legend.querySelector(`.legend-count.${cls}`) || (cls === 'progress' ? legend.querySelector('.legend-count.in-progress') : null);
+        if (el) el.textContent = `(${val})`;
+      };
+      setCount('backlog', count.backlog);
+      setCount('progress', count.progress);
+      setCount('review', count.review);
+      setCount('done', count.done);
+    }
   }
 
   _updateColumnCounts(board) {
@@ -784,3 +1019,32 @@ class AppCore {
 document.addEventListener('DOMContentLoaded', () => {
   window.app = new AppCore();
 });
+      const actions = card.querySelector('.card-actions');
+      actions.querySelector('[data-action="delete"]').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        try {
+          const base = (window.location.origin && window.location.origin.startsWith('http')) ? '' : 'http://localhost:3000';
+          const tokenDel = localStorage.getItem('token') || '';
+          const res = await fetch(`${base}/api/tasks/${task.id}`, { method: 'DELETE', headers: tokenDel ? { Authorization: `Bearer ${tokenDel}` } : {} });
+          if (!res.ok) throw new Error('Delete failed');
+          this.data.tasks = (this.data.tasks || []).filter(x => String(x.id) !== String(task.id));
+          this._renderBoard(board);
+          this.updateTasksStatusWidget();
+          this.renderPinnedTasks();
+        } catch (_) {}
+      });
+      actions.querySelector('[data-action="edit"]').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const title = prompt('Edit title', task.title);
+        if (!title || title.trim() === task.title) return;
+        const next = { title: title.trim() };
+        try {
+          const base = (window.location.origin && window.location.origin.startsWith('http')) ? '' : 'http://localhost:3000';
+        const tokenEdit = localStorage.getItem('token') || '';
+        const res = await fetch(`${base}/api/tasks/${task.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...(tokenEdit ? { Authorization: `Bearer ${tokenEdit}` } : {}) }, body: JSON.stringify(next) });
+          if (!res.ok) throw new Error('Edit failed');
+          task.title = next.title;
+          const titleEl = card.querySelector('.card-title');
+          if (titleEl) titleEl.textContent = next.title;
+        } catch (_) {}
+      });

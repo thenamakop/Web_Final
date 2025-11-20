@@ -324,30 +324,26 @@
 
       
 
-      <div class="sidebar-profile">
-        <div class="avatar" aria-hidden="true">MG</div>
+      <div class="sidebar-profile" id="profile-row">
+        <div class="avatar" aria-hidden="true"></div>
         <div class="profile-info">
-          <div class="profile-name">Maulik Gupta</div>
-          <div class="profile-email">maulikgupta21@gmail.com</div>
+          <div class="profile-name"></div>
+          <div class="profile-email"></div>
         </div>
-        <button class="icon-button" aria-label="Settings">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="12" cy="12" r="3"></circle>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1 1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-          </svg>
-        </button>
+        <div class="profile-menu" id="profile-menu">
+          <div class="menu-item" id="logout-action">
+            <svg viewBox="0 0 24 24" aria-hidden="true" style="width:16px;height:16px"><path d="M10 17l5-5-5-5v10zm-7 0h2V7H3v10zm8-14h10v2H11V3zm0 16h10v2H11v-2z" fill="currentColor"></path></svg>
+            <span>Logout</span>
+          </div>
+        </div>
       </div>
     </aside>
 
     <div class="main">
       <header class="topbar">
-        <div class="search">
-          <span class="search-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24">
-              <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16a6.471 6.471 0 0 0 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zM9.5 14C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" fill="currentColor"></path>
-            </svg>
-          </span>
-          <input type="search" placeholder="Search..." aria-label="Search" />
+        <div class="page-title">
+          <h1>Inbox</h1>
+          <p class="page-subtitle">Your notifications</p>
         </div>
 
         <div class="topbar-actions">
@@ -373,20 +369,32 @@
       </header>
 
       <main class="content">
-        <div class="inbox-container">
-          <div class="inbox-header">
-            <h1>Inbox</h1>
-            <a href="#" class="mark-all-read">Mark all as read</a>
-          </div>
-          
-          <div class="inbox-tabs">
-            <button class="inbox-tab active">All</button>
-            <button class="inbox-tab">Unread</button>
-            <button class="inbox-tab">Mentions</button>
-            <button class="inbox-tab">Assigned</button>
-          </div>
-          
-          <div class="notifications-list">
+        <div class="inbox-layout">
+          <aside class="inbox-panel inbox-sidebar">
+            <div class="inbox-section">
+              <div class="inbox-section-title">Filters</div>
+              <div class="inbox-filter-list">
+                <button class="inbox-filter active inbox-tab" data-filter="all">All</button>
+                <button class="inbox-filter inbox-tab" data-filter="unread">Unread</button>
+                <button class="inbox-filter inbox-tab" data-filter="mentions">Mentions</button>
+                <button class="inbox-filter inbox-tab" data-filter="assigned">Assigned</button>
+              </div>
+            </div>
+            <div class="inbox-section">
+              <div class="inbox-section-title">Bulk</div>
+              <div class="inbox-actions">
+                <a href="#" class="button mark-all-read">Mark all as read</a>
+              </div>
+            </div>
+          </aside>
+          <section class="inbox-panel inbox-content">
+            <div class="inbox-header-compact">
+              <h2 style="margin:0">Notifications</h2>
+              <div class="inbox-actions">
+                <span class="muted">Latest</span>
+              </div>
+            </div>
+            <div class="notifications-list">
             <div class="notification-item unread">
               <div class="notification-avatar">JD</div>
               <div class="notification-content">
@@ -484,7 +492,8 @@
                 </div>
               </div>
             </div>
-          </div>
+            </div>
+          </section>
         </div>
       </main>
     </div>
